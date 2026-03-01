@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+"""OpenClaw skill wrapper for Mr. Clipper.
+
+This script simply forwards all arguments to the installed `mrclipper` CLI command.
+"""
+
+import subprocess
+import sys
+
+
+def main():
+    # Forward all arguments to mrclipper CLI
+    result = subprocess.run(["mrclipper"] + sys.argv[1:])
+    sys.exit(result.returncode)
+
+
+if __name__ == "__main__":
+    main()

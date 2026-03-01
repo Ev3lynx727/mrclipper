@@ -1,0 +1,35 @@
+# Job Config: TikTok/Reels (9:16 vertical)
+# Copy to ~/jobs/tiktok.toml and use: --config ~/jobs/tiktok.toml
+
+[aspect]
+default = "9:16"          # Vertical video for mobile
+pad_color = "black"
+
+[subtitles]
+mode = "soft"            # Keep as separate file (TikTok allows upload of .srt)
+# Alternatively set to "burn" if you want baked-in subs
+
+[output]
+format = "mp4"
+crf = 23
+preset = "fast"
+
+[paths]
+output = "~/Videos/TikTok"
+
+[clips]
+default_duration = 30    # TikTok max is 60, but 30 is safer for highlights
+highlight_length = 30
+
+[highlights]
+strategy = ["scene+audio"]  # More selective for viral moments
+num_clips = 8
+clip_length = 30
+scene_threshold = 0.35       # Slightly more sensitive to scene changes
+audio_min_peak_db = -18.0    # Detect louder moments
+
+[publisher]
+# TikTok captions often shorter + more emojis
+caption_template = "🔥 {title}\n⏱ {start}\n\n#TikTok #Viral #FYP"
+auto_generate_tags = false  # Use template-defined tags instead
+default_tags = ["tiktok", "viral", "fyp", "trending"]

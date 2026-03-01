@@ -1,0 +1,115 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v1.0.1
+
+permissions:
+  contents: write  # Needed to create GitHub Release
+  id-token: write  # Needed for PyPI trusted publishing
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for versioning
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine pytest
+
+      - name: Run tests
+        run: |
+          pip install -e .
+          pytest tests/ -v --tb=short
+
+      - name: Build wheel
+        run: python -m build --wheel
+
+      - name: Check wheel
+        run: twine check dist/*
+
+      - name: Save build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels
+          path: dist/*.whl
+
+  package-skill:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Zip skill folder
+        run: |
+          cd skills/video-clipper
+          zip -r ../../mrclipper-skill-${{ github.ref_name }}.zip .
+
+      - name: Upload skill artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mrclipper-skill
+          path: mrclipper-skill-*.zip
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: [build-and-test, package-skill]
+    if: starts-with(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Using trusted publishing (no API key needed if configured in PyPI)
+          # If using API token:
+          # password: ${{ secrets.PYPI_API_TOKEN }}
+          # Repository-url: https://upload.pypi.org/legacy/
+          skip-existing: true
+
+      - name: Download skill artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mrclipper-skill
+          path: .
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create ${{ github.ref_name }} \
+            --title "Mr. Clipper ${{ github.ref_name }}" \
+            --notes-file <(cat <<'EOF'
+          ## What's Included
+
+          - **mrclipper** Python package (install with `pip install mrclipper`)
+          - **mrclipper-skill** OpenClaw skill (extract to `~/.openclaw/workspace/skills/`)
+
+          ## Installation
+
+          1. Install CLI: `pip install mrclipper`
+          2. Install skill: extract `mrclipper-skill-${{ github.ref_name }}.zip` to `~/.openclaw/workspace/skills/`
+
+          See README.md for full instructions.
+          EOF
+            ) \
+            dist/*.whl \
+            mrclipper-skill-${{ github.ref_name }}.zip
+
+          echo "✅ Release ${{ github.ref_name }} created with assets"

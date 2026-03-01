@@ -1,0 +1,49 @@
+# Mr. Clipper Global Configuration
+# Place at: ~/.config/mrclipper/config.toml
+
+[output]
+format = "mp4"
+codec = "libx264"
+crf = 23                   # Quality (lower = better, 18-28 range)
+preset = "fast"            # Encoding speed: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
+
+[paths]
+workdir = "/tmp/vr-clipper"  # Change to your preferred temp location
+output = "~/Videos/MrClipper"  # Default output directory
+log_file = "~/.local/share/mrclipper/mrclipper.log"  # Persistent log file (optional)
+
+[subtitles]
+mode = "soft"              # soft (separate file), burn (re-encode), none
+languages = ["en"]         # Subtitle languages to download
+auto_generate = false      # Use Whisper if no subs (requires openai-whisper skill)
+
+[aspect]
+default = "auto"           # auto, source, 16:9, 9:16, 1:1, 4:3
+pad_color = "black"        # Letterbox/pillarbox color: black, white, blur
+
+[clips]
+default_duration = 30      # Seconds for manual clips
+max_highlights = 5         # (legacy) Number of auto-highlight clips
+highlight_length = 30      # (legacy) Seconds per highlight clip
+
+[highlights]
+strategy = ["scene", "audio"]  # Mode B: scene+audio detection (default)
+num_clips = 5                   # Number of highlights to generate
+clip_length = 30                # Duration of each highlight
+scene_threshold = 0.4           # Scene change sensitivity (0.0-1.0)
+audio_min_peak_db = -20.0       # Audio peak threshold (dB)
+
+[manifest]
+enabled = true
+path = "~/.local/share/mrclipper/manifest.jsonl"  # Downloads history (JSONL)
+
+[publisher]
+# Caption generation for mrpublisher integration
+caption_template = "🎬 {title}\n⏱ {start} ({duration}s)\n\nFull video: {url}"  # Optional
+# default_tags = ["mrclipper", "highlight"]  # Optional static tags
+auto_generate_tags = true  # Generate tags from video title (default: true)
+
+[yt-dlp]
+format = "best[ext=mp4]"   # Preferred format
+# Extra options can be added as array:
+# extra_opts = ["--no-playlist", "--restrict-filenames"]

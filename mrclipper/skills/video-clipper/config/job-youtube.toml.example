@@ -1,0 +1,36 @@
+# Job Config: YouTube (16:9 horizontal)
+# Copy to ~/jobs/youtube.toml and use: --config ~/jobs/youtube.toml
+
+[aspect]
+default = "16:9"          # Standard widescreen
+pad_color = "black"
+
+[subtitles]
+mode = "soft"            # YouTube accepts .srt/.vtt
+languages = ["en", "id"]  # Download English and Indonesian if available
+
+[output]
+format = "mp4"
+crf = 20                 # Higher quality for YouTube
+preset = "medium"
+
+[paths]
+output = "~/Videos/YouTube"
+
+[clips]
+default_duration = 60    # YouTube allows longer clips
+highlight_length = 45
+max_highlights = 10
+
+[highlights]
+strategy = ["scene", "audio"]  # Balanced detection
+num_clips = 10
+clip_length = 45
+scene_threshold = 0.4
+audio_min_peak_db = -20.0
+
+[publisher]
+# YouTube-friendly captions with link
+caption_template = "🎥 {title}\n🕒 {start} ({duration}s)\n\nWatch the full video: {url}"
+auto_generate_tags = true
+# default_tags = ["youtube", "highlight"]  # Optional
