@@ -126,10 +126,11 @@ class MrClipperConfig(BaseModel):
         return cls(**cfg_data)
 
 
-def deep_update(base: dict, override: dict):
-    """Recursively merge override into base."""
+def deep_update(base: dict, override: dict) -> dict:
+    """Recursively merge override into base. Returns the updated base."""
     for k, v in override.items():
         if isinstance(v, dict) and k in base and isinstance(base[k], dict):
             deep_update(base[k], v)
         else:
             base[k] = v
+    return base

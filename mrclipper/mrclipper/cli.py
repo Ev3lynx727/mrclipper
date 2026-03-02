@@ -187,11 +187,6 @@ def clip(
         ensure_deps()
         cfg = runtime.config
 
-        # Merge job-specific config if provided
-        if config and config.exists():
-            job_cfg = load_config(config)
-            cfg = deep_update(cfg.copy(), job_cfg)
-
         workdir_base = Path(cfg["paths"].get("workdir", "/tmp/vr-clipper"))
         with temp_workdir(workdir_base) as workdir:
             video_file = download_video(url, workdir, cfg)
@@ -267,10 +262,6 @@ def auto_highlight(
         runtime = get_runtime(ctx)
         ensure_deps()
         cfg = runtime.config
-
-        if config and config.exists():
-            job_cfg = load_config(config)
-            cfg = deep_update(cfg.copy(), job_cfg)
 
         workdir_base = Path(cfg["paths"].get("workdir", "/tmp/vr-clipper"))
         with temp_workdir(workdir_base) as workdir:
@@ -349,10 +340,6 @@ def search(
         runtime = get_runtime(ctx)
         ensure_deps()
         cfg = runtime.config
-
-        if config and config.exists():
-            job_cfg = load_config(config)
-            cfg = deep_update(cfg.copy(), job_cfg)
 
         output_dir = output or Path(cfg["paths"].get("output", "/tmp/vr-clipper"))
         output_dir.mkdir(parents=True, exist_ok=True)
