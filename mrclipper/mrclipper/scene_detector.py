@@ -58,6 +58,9 @@ def detect_audio_peaks(video: Path, min_peak_ratio: float = 0.3) -> list[float]:
     """
     Detect audio volume peaks using ffmpeg's astats filter.
 
+    Optimized to run ffmpeg only once - collects all audio data in a single pass,
+    then processes in memory to find peaks.
+
     Args:
         video: Path to video file
         min_peak_ratio: Minimum peak level as fraction of max (0.0-1.0)
@@ -66,22 +69,25 @@ def detect_audio_peaks(video: Path, min_peak_ratio: float = 0.3) -> list[float]:
         List of timestamps (in seconds) with high audio volume
     """
     logger.debug("Detecting audio peaks (min_ratio=%.2f)", min_peak_ratio)
-    # Use ffmpeg with astats to get per-frame audio stats
-    # We'll analyze max_volume per frame
+
+    # Single-pass: collect all max_volume data with timestamps
     cmd = ["ffmpeg", "-i", str(video), "-af", "astats=metadata=1:reset=1", "-f", "null", "-"]
     result = subprocess.run(cmd, capture_output=True, text=True)
 
-    peaks = []
+    # Collect all volume data with timestamps in a single pass
+    audio_data: list[tuple[float, float]] = []  # (timestamp, linear_volume)
     max_volume_seen = 0.0
 
-    # First pass: find maximum volume overall
     for line in result.stderr.split("\n"):
         if "N=" in line and "max_volume=" in line:
-            max_match = re.search(r"max_volume=([\d.-]+) dB", line)
-            if max_match:
-                vol = float(max_match.group(1))
+            time_match = re.search(r"t=([\d.]+)", line)
+            vol_match = re.search(r"max_volume=([\d.-]+) dB", line)
+            if time_match and vol_match:
+                t = float(time_match.group(1))
+                vol = float(vol_match.group(1))
                 # Convert dB to linear ratio (approximate)
                 linear = 10 ** (vol / 20) if vol < 0 else 1.0
+                audio_data.append((t, linear))
                 if linear > max_volume_seen:
                     max_volume_seen = linear
 
@@ -90,21 +96,9 @@ def detect_audio_peaks(video: Path, min_peak_ratio: float = 0.3) -> list[float]:
         logger.debug("No audio detected")
         return []
 
-    # Second pass: collect peaks
+    # Calculate threshold and find peaks in memory
     threshold_linear = max_volume_seen * min_peak_ratio
-    cmd2 = ["ffmpeg", "-i", str(video), "-af", "astats=metadata=1:reset=1", "-f", "null", "-"]
-    result2 = subprocess.run(cmd2, capture_output=True, text=True)
-
-    for line in result2.stderr.split("\n"):
-        if "N=" in line and "max_volume=" in line:
-            time_match = re.search(r"t=([\d.]+)", line)
-            vol_match = re.search(r"max_volume=([\d.-]+) dB", line)
-            if time_match and vol_match:
-                t = float(time_match.group(1))
-                vol = float(vol_match.group(1))
-                linear = 10 ** (vol / 20) if vol < 0 else 1.0
-                if linear >= threshold_linear:
-                    peaks.append(t)
+    peaks = [t for t, vol in audio_data if vol >= threshold_linear]
 
     # Deduplicate close peaks
     if peaks:

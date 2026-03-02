@@ -2,27 +2,41 @@
 
 import logging
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Optional
 
 import typer
+from typing_extensions import Annotated
 
 from . import __version__
 from .aspect import process_aspect_ratio
 from .clip import clip_video
 from .config import load_config
+from .config_models import deep_update
 from .download import download_video, find_subtitle_file
 from .exceptions import MrClipperError
 from .highlights import detect_highlights
 from .logging_config import setup_logging
-from .manifest import manifest
+from .manifest import DownloadManifest, manifest
 from .subtitles import burn_subtitles
 from .utils import ensure_deps, temp_workdir
 
 app = typer.Typer(
     name="mrclipper",
-    help="Mr. Clipper ✂️ — Advanced video clipper for OpenClaw",
+    help="Mr. Clipper — Advanced video clipper for OpenClaw",
     add_completion=True,
 )
+
+
+@dataclass
+class RuntimeContext:
+    """Shared runtime context for all CLI commands."""
+
+    config: dict[str, Any]
+    manifest: DownloadManifest
+    verbose: bool
+    quiet: bool
 
 
 @app.command()
@@ -60,38 +74,21 @@ def manifest_stats(
     typer.echo(f"   Avg duration: {stats['avg_duration_seconds']}s")
 
 
-def initialize_runtime(cfg: dict, verbose: bool, quiet: bool):
-    """Initialize logging (including file) and manifest from config."""
-    # Setup file logging if configured
-    log_file_path = cfg.get("paths", {}).get("log_file")
-    if log_file_path:
-        log_file = Path(log_file_path).expanduser()
-    else:
-        # Default log file in XDG state home
-        log_file = Path.home() / ".local" / "share" / "mrclipper" / "mrclipper.log"
-    setup_logging(verbose=verbose, quiet=quiet, log_file=log_file)
-
-    # Initialize manifest
-    if cfg.get("manifest", {}).get("enabled", True):
-        manifest_path = cfg.get("manifest", {}).get("path")
-        if manifest_path:
-            manifest.path = Path(manifest_path).expanduser()
-        else:
-            manifest.path = Path.home() / ".local" / "share" / "mrclipper" / "manifest.jsonl"
-        logger = logging.getLogger("mrclipper")
-        logger.info("Manifest logging enabled: %s", manifest.path)
-    else:
-        logger = logging.getLogger("mrclipper")
-        logger.info("Manifest logging disabled")
-
-
 def version_callback(value: bool):
     if value:
         typer.echo(f"mrclipper {__version__}")
         raise typer.Exit()
 
 
-@app.callback()
+def get_config_path(config: Optional[Path]) -> Optional[Path]:
+    """Resolve config path from CLI option."""
+    if config is None:
+        default_path = Path.home() / ".config" / "mrclipper" / "config.toml"
+        return default_path if default_path.exists() else None
+    return config
+
+
+@app.callback(invoke_without_command=True)
 def common(
     ctx: typer.Context,
     version: bool = typer.Option(
@@ -99,10 +96,64 @@ def common(
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress info logs"),
+    config: Annotated[
+        Optional[Path], typer.Option("-c", "--config", help="Config file path")
+    ] = None,
 ):
-    """Common options."""
-    ctx.obj = {"verbose": verbose, "quiet": quiet}
-    setup_logging(verbose=verbose, quiet=quiet)  # Console-only for now
+    """Common options for all commands."""
+    ctx.obj = {"verbose": verbose, "quiet": quiet, "config_path": get_config_path(config)}
+
+
+def get_runtime(ctx: typer.Context) -> RuntimeContext:
+    """Get or initialize runtime context.
+
+    Uses lazy initialization to avoid loading config for commands that don't need it
+    (like manifest commands).
+    """
+    if "runtime" not in ctx.obj:
+        verbose = ctx.obj.get("verbose", False)
+        quiet = ctx.obj.get("quiet", False)
+        config_path = ctx.obj.get("config_path")
+
+        # Setup console logging first
+        log_file_path = None
+        if config_path and config_path.exists():
+            try:
+                cfg = load_config(config_path)
+                log_file_path = cfg.get("paths", {}).get("log_file")
+            except Exception:
+                pass
+
+        if log_file_path:
+            log_file = Path(log_file_path).expanduser()
+        else:
+            log_file = Path.home() / ".local" / "share" / "mrclipper" / "mrclipper.log"
+        setup_logging(verbose=verbose, quiet=quiet, log_file=log_file)
+
+        # Load config and initialize manifest
+        cfg = load_config(config_path) if config_path else load_config(None)
+
+        manifest_enabled = cfg.get("manifest", {}).get("enabled", True)
+        manifest_path = cfg.get("manifest", {}).get("path")
+        if manifest_enabled:
+            if manifest_path:
+                manifest.path = Path(manifest_path).expanduser()
+            else:
+                manifest.path = Path.home() / ".local" / "share" / "mrclipper" / "manifest.jsonl"
+            logger = logging.getLogger("mrclipper")
+            logger.info("Manifest logging enabled: %s", manifest.path)
+        else:
+            logger = logging.getLogger("mrclipper")
+            logger.info("Manifest logging disabled")
+
+        ctx.obj["runtime"] = RuntimeContext(
+            config=cfg,
+            manifest=manifest,
+            verbose=verbose,
+            quiet=quiet,
+        )
+
+    return ctx.obj["runtime"]
 
 
 @app.command()
@@ -128,17 +179,24 @@ def clip(
 ):
     """Clip a video from URL."""
     try:
+        # Handle config override from CLI
+        if config:
+            ctx.obj["config_path"] = config
+
+        runtime = get_runtime(ctx)
         ensure_deps()
-        cfg = load_config(config)
-        # Initialize runtime (logging, manifest) with file logging from config
-        initialize_runtime(
-            cfg, verbose=ctx.obj.get("verbose", False), quiet=ctx.obj.get("quiet", False)
-        )
+        cfg = runtime.config
+
+        # Merge job-specific config if provided
+        if config and config.exists():
+            job_cfg = load_config(config)
+            cfg = deep_update(cfg.copy(), job_cfg)
+
         workdir_base = Path(cfg["paths"].get("workdir", "/tmp/vr-clipper"))
         with temp_workdir(workdir_base) as workdir:
             video_file = download_video(url, workdir, cfg)
             typer.echo(f"Downloaded: {video_file}", err=True)
-            processed_video = video_file
+            processed_video: Path = video_file
             # Aspect ratio processing
             target_aspect = aspect or cfg["aspect"].get("default", "auto")
             if target_aspect not in ["auto", "source"]:
@@ -147,7 +205,7 @@ def clip(
                     video_file, aspect_out, target_aspect, cfg["aspect"].get("pad_color", "black")
                 )
             # Subtitles
-            sub_file = None
+            sub_file: Path | None = None
             subs_mode = cfg["subtitles"].get("mode", "soft")
             if subs_mode != "none":
                 sub_file = find_subtitle_file(video_file)
@@ -181,10 +239,10 @@ def clip(
             )
             typer.echo(str(output))
     except MrClipperError as e:
-        typer.echo(f"❌ {e}", err=True)
+        typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(2)
     except Exception as e:
-        typer.echo(f"❌ Unexpected error: {e}", err=True)
+        typer.echo(f"Unexpected error: {e}", err=True)
         raise typer.Exit(2)
 
 
@@ -203,17 +261,22 @@ def auto_highlight(
 ):
     """Auto-detect highlights from a video."""
     try:
+        if config:
+            ctx.obj["config_path"] = config
+
+        runtime = get_runtime(ctx)
         ensure_deps()
-        cfg = load_config(config)
-        # Initialize runtime (logging, manifest) with file logging
-        initialize_runtime(
-            cfg, verbose=ctx.obj.get("verbose", False), quiet=ctx.obj.get("quiet", False)
-        )
+        cfg = runtime.config
+
+        if config and config.exists():
+            job_cfg = load_config(config)
+            cfg = deep_update(cfg.copy(), job_cfg)
+
         workdir_base = Path(cfg["paths"].get("workdir", "/tmp/vr-clipper"))
         with temp_workdir(workdir_base) as workdir:
             video_file = download_video(url, workdir, cfg)
             typer.echo(f"Downloaded: {video_file}", err=True)
-            processed_video = video_file
+            processed_video: Path = video_file
             target_aspect = cfg["aspect"].get("default", "auto")
             if target_aspect not in ["auto", "source"]:
                 aspect_out = workdir / f"aspect_{video_file.name}"
@@ -241,10 +304,10 @@ def auto_highlight(
             result_dir = detect_highlights(processed_video, output_dir, cfg=cfg)
             typer.echo(str(result_dir))
     except MrClipperError as e:
-        typer.echo(f"❌ {e}", err=True)
+        typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(2)
     except Exception as e:
-        typer.echo(f"❌ Unexpected error: {e}", err=True)
+        typer.echo(f"Unexpected error: {e}", err=True)
         raise typer.Exit(2)
 
 
@@ -256,13 +319,13 @@ def config_validate(
 ):
     """Validate a configuration file."""
     if not path.exists():
-        typer.echo(f"❌ Config file not found: {path}", err=True)
+        typer.echo(f"Config file not found: {path}", err=True)
         raise typer.Exit(1)
     try:
         load_config(path)  # Just validate, don't need to store
-        typer.echo("✅ Config is valid")
+        typer.echo("Config is valid")
     except Exception as e:
-        typer.echo(f"❌ Config error: {e}", err=True)
+        typer.echo(f"Config error: {e}", err=True)
         raise typer.Exit(1)
 
 
@@ -280,11 +343,17 @@ def search(
     Downloads up to `limit` videos matching the search.
     """
     try:
+        if config:
+            ctx.obj["config_path"] = config
+
+        runtime = get_runtime(ctx)
         ensure_deps()
-        cfg = load_config(config)
-        initialize_runtime(
-            cfg, verbose=ctx.obj.get("verbose", False), quiet=ctx.obj.get("quiet", False)
-        )
+        cfg = runtime.config
+
+        if config and config.exists():
+            job_cfg = load_config(config)
+            cfg = deep_update(cfg.copy(), job_cfg)
+
         output_dir = output or Path(cfg["paths"].get("output", "/tmp/vr-clipper"))
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -319,15 +388,15 @@ def search(
                 path = line.split("Destination:", 1)[1].strip()
                 downloaded.append(Path(path))
 
-        typer.echo(f"✅ Downloaded {len(downloaded)} video(s) to: {output_dir}")
+        typer.echo(f"Downloaded {len(downloaded)} video(s) to: {output_dir}")
         for p in downloaded:
-            typer.echo(f"  • {p.name}", err=True)
+            typer.echo(f"  - {p.name}", err=True)
 
     except MrClipperError as e:
-        typer.echo(f"❌ {e}", err=True)
+        typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(2)
     except Exception as e:
-        typer.echo(f"❌ Unexpected error: {e}", err=True)
+        typer.echo(f"Unexpected error: {e}", err=True)
         raise typer.Exit(2)
 
 
