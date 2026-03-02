@@ -109,19 +109,31 @@ class MrClipperConfig(BaseModel):
         if global_path is None:
             global_path = Path.home() / ".config" / "mrclipper" / "config.toml"
         if global_path.exists():
-            import toml
+            try:
+                import tomllib
 
-            with open(global_path) as f:
-                global_cfg = toml.load(f)
-                deep_update(cfg_data, global_cfg)
+                with open(global_path, "rb") as f:
+                    global_cfg = tomllib.load(f)
+            except ImportError:
+                import toml
+
+                with open(global_path) as f:
+                    global_cfg = toml.load(f)
+            deep_update(cfg_data, global_cfg)
 
         # Load job (overrides global)
         if job_path and job_path.exists():
-            import toml
+            try:
+                import tomllib
 
-            with open(job_path) as f:
-                job_cfg = toml.load(f)
-                deep_update(cfg_data, job_cfg)
+                with open(job_path, "rb") as f:
+                    job_cfg = tomllib.load(f)
+            except ImportError:
+                import toml
+
+                with open(job_path) as f:
+                    job_cfg = toml.load(f)
+            deep_update(cfg_data, job_cfg)
 
         return cls(**cfg_data)
 
