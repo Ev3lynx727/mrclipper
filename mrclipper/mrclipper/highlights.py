@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .clip import clip_video
+from .manifest import manifest
 from .metadata import write_metadata
 from .scene_detector import detect_audio_peaks, detect_scene_changes, select_highlights
 from .video import get_video_duration
@@ -25,8 +26,6 @@ def detect_highlights(video: Path, output_dir: Path, cfg: dict[str, Any] | None 
 
     Falls back to even spacing if detectors fail or find nothing.
     """
-    from .manifest import manifest
-
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Extract config with defaults

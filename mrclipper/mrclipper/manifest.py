@@ -80,7 +80,7 @@ class DownloadManifest:
             entry["metadata"] = metadata
 
         try:
-            with self.manifest_path.open("a", encoding="utf-8") as f:
+            with self.path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
         except Exception as e:
             logger.warning("Failed to write manifest: %s", e)
